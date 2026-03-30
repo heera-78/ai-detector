@@ -1,23 +1,17 @@
 # app.py
 
 import os
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from transformers import pipeline
-import torch
 
 app = Flask(__name__)
 CORS(app)
 
-print("Loading cyberbullying detection model...")
+HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
+MODEL_URL = "https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-offensive"
 
-classifier = pipeline(
-    "text-classification",
-    model="cardiffnlp/twitter-roberta-base-offensive",
-    return_all_scores=True
-)
-
-print("Model loaded and ready!")
+print("AI Detector ready — using HuggingFace Inference API!")
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -32,37 +26,35 @@ def detect():
         if not text:
             return jsonify({ "error": "No text provided" }), 400
 
-        results = classifier(text)
-
-        # Flatten if nested list
-        if isinstance(results[0], list):
-            results = results[0]
-
-        print("Raw results:", results)
-        print("All labels:", [r["label"] for r in results])
-
-        scores = { r["label"]: r["score"] for r in results }
-        print("Scores dict:", scores)
-
-        # Check all possible label names
-        offensive_score = (
-            scores.get("offensive") or
-            scores.get("LABEL_1") or
-            scores.get("toxic") or
-            0
+        # Call HuggingFace Inference API
+        response = requests.post(
+            MODEL_URL,
+            headers={ "Authorization": f"Bearer {HF_API_TOKEN}" },
+            json={ "inputs": text }
         )
 
-        non_offensive_score = (
-            scores.get("non-offensive") or
-            scores.get("LABEL_0") or
-            scores.get("non_offensive") or
-            0
-        )
+        result = response.json()
+        print("HF result:", result)
 
-        print(f"offensive_score: {offensive_score}")
-        print(f"non_offensive_score: {non_offensive_score}")
+        # Handle model loading (first request may need to wait)
+        if isinstance(result, dict) and "error" in result:
+            return jsonify({
+                "error": result["error"],
+                "isBullying": False,
+                "score": 0,
+                "confidence": "0%"
+            }), 200
 
-        # If we only got non-offensive score, derive offensive
+        # Flatten if nested
+        if isinstance(result[0], list):
+            result = result[0]
+
+        scores = { r["label"]: r["score"] for r in result }
+        print("Scores:", scores)
+
+        offensive_score = scores.get("offensive", 0)
+        non_offensive_score = scores.get("non-offensive", 0)
+
         if offensive_score == 0 and non_offensive_score > 0:
             offensive_score = 1 - non_offensive_score
 
@@ -72,8 +64,7 @@ def detect():
             "text": text,
             "isBullying": is_bullying,
             "score": round(offensive_score, 4),
-            "confidence": f"{round(offensive_score * 100, 1)}%",
-            "debug_scores": scores
+            "confidence": f"{round(offensive_score * 100, 1)}%"
         })
 
     except Exception as e:
@@ -81,4 +72,4 @@ def detect():
         return jsonify({ "error": str(e) }), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
