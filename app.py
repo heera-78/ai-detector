@@ -9,7 +9,7 @@ app = Flask(__name__)
 CORS(app)
 
 HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
-MODEL_URL = "https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-offensive"
+MODEL_URL = "https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-roberta-base-offensive"
 
 print("AI Detector ready — using HuggingFace Inference API!")
 
